@@ -144,13 +144,39 @@ async function searchCommits({ username, start, end, page, token }) {
   return githubRequest(url, token);
 }
 
-function normalizeCommit(item, ignoredOwners) {
+async function getRepositoryDetails(repositoryName, token, repositoryCache) {
+  if (repositoryCache.has(repositoryName)) {
+    return repositoryCache.get(repositoryName);
+  }
+
+  const encodedName = repositoryName
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const details = await githubRequest(
+    `https://api.github.com/repos/${encodedName}`,
+    token,
+  );
+
+  repositoryCache.set(repositoryName, details);
+  return details;
+}
+
+async function normalizeCommit(item, ignoredOwners, token, repositoryCache) {
   if (!item?.repository || item.repository.private) {
     return null;
   }
 
-  const repositoryName = item.repository.full_name;
-  const repositoryOwner = item.repository.owner?.login?.toLowerCase();
+  const repository = await getRepositoryDetails(
+    item.repository.full_name,
+    token,
+    repositoryCache,
+  );
+  const displayRepository = repository.fork && repository.parent
+    ? repository.parent
+    : repository;
+  const repositoryName = displayRepository.full_name;
+  const repositoryOwner = displayRepository.owner?.login?.toLowerCase();
 
   if (repositoryOwner && ignoredOwners.has(repositoryOwner)) {
     return null;
@@ -165,7 +191,7 @@ function normalizeCommit(item, ignoredOwners) {
   const title = (item.commit.message || "Untitled commit")
     .split("\n")[0]
     .trim();
-  const url = item.html_url || `${item.repository.html_url}/commit/${item.sha}`;
+  const url = `${displayRepository.html_url}/commit/${item.sha}`;
 
   return {
     sha: item.sha,
@@ -173,9 +199,9 @@ function normalizeCommit(item, ignoredOwners) {
     title: title || "Untitled commit",
     url,
     authoredAt,
-    stars: item.repository.stargazers_count ?? 0,
+    stars: displayRepository.stargazers_count ?? 0,
     repositoryName,
-    repositoryUrl: item.repository.html_url,
+    repositoryUrl: displayRepository.html_url,
   };
 }
 
@@ -189,6 +215,7 @@ async function collectWindowCommits({
   maxCommits,
   warnings,
   ignoredOwners,
+  repositoryCache,
 }) {
   const firstPage = await searchCommits({
     username,
@@ -222,6 +249,7 @@ async function collectWindowCommits({
         maxCommits,
         warnings,
         ignoredOwners,
+        repositoryCache,
       });
     }
 
@@ -236,7 +264,7 @@ async function collectWindowCommits({
     );
   }
 
-  const maybeAddCommits = (items) => {
+  const maybeAddCommits = async (items) => {
     if (commits.length >= maxCommits) {
       return;
     }
@@ -246,7 +274,12 @@ async function collectWindowCommits({
         break;
       }
 
-      const commit = normalizeCommit(item, ignoredOwners);
+      const commit = await normalizeCommit(
+        item,
+        ignoredOwners,
+        token,
+        repositoryCache,
+      );
 
       if (!commit || commitUrls.has(commit.url)) {
         continue;
@@ -257,7 +290,7 @@ async function collectWindowCommits({
     }
   };
 
-  maybeAddCommits(firstPage.items || []);
+  await maybeAddCommits(firstPage.items || []);
 
   const totalPages = Math.ceil(cappedTotal / SEARCH_RESULTS_PER_PAGE);
 
@@ -267,7 +300,7 @@ async function collectWindowCommits({
     page += 1
   ) {
     const nextPage = await searchCommits({ username, start, end, page, token });
-    maybeAddCommits(nextPage.items || []);
+    await maybeAddCommits(nextPage.items || []);
   }
 
   return firstPage.total_count;
@@ -380,6 +413,7 @@ async function main() {
 
   const commits = [];
   const commitUrls = new Set();
+  const repositoryCache = new Map();
   const warnings = new Set();
   let totalCommits = 0;
 
@@ -394,6 +428,7 @@ async function main() {
       maxCommits,
       warnings,
       ignoredOwners,
+      repositoryCache,
     });
   }
 
