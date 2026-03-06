@@ -433,9 +433,13 @@ async function main() {
   }
 
   commits.sort(
-    (left, right) =>
-      new Date(right.authoredAt).getTime() -
-      new Date(left.authoredAt).getTime(),
+    (left, right) => {
+      if (right.stars !== left.stars) {
+        return right.stars - left.stars;
+      }
+
+      return new Date(right.authoredAt).getTime() - new Date(left.authoredAt).getTime();
+    },
   );
 
   const sectionContent = buildSection({
