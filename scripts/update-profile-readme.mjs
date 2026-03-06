@@ -5,6 +5,9 @@ import path from "node:path";
 
 const DEFAULT_SECTION_START = "<!-- contributions:start -->";
 const DEFAULT_SECTION_END = "<!-- contributions:end -->";
+const SEARCH_RESULTS_PER_PAGE = 100;
+const SEARCH_RESULT_WINDOW_LIMIT = 900;
+const MIN_SPLIT_WINDOW_DAYS = 31;
 
 function getEnv(name, fallback = undefined) {
   const value = process.env[name];
@@ -36,119 +39,212 @@ function parseArgs(argv) {
   return args;
 }
 
-function getYearRanges(lookbackYears) {
-  const now = new Date();
-  const currentYear = now.getUTCFullYear();
-  const ranges = [];
-
-  for (let year = currentYear; year > currentYear - lookbackYears; year -= 1) {
-    ranges.push({
-      year,
-      from: new Date(Date.UTC(year, 0, 1, 0, 0, 0)).toISOString(),
-      to: new Date(Date.UTC(year, 11, 31, 23, 59, 59)).toISOString(),
-    });
-  }
-
-  return ranges;
+function toIsoDate(value) {
+  return value.toISOString().slice(0, 10);
 }
 
-async function graphqlRequest(query, variables, token) {
-  const response = await fetch("https://api.github.com/graphql", {
-    method: "POST",
+function formatDate(value) {
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(value);
+}
+
+function truncate(value, length) {
+  if (value.length <= length) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, length - 1)).trimEnd()}...`;
+}
+
+function splitDateRange(start, end) {
+  const midpoint = new Date(start.getTime() + Math.floor((end.getTime() - start.getTime()) / 2));
+  const leftEnd = new Date(midpoint.getTime());
+  const rightStart = new Date(midpoint.getTime() + 1000);
+
+  return [
+    { start: rightStart, end },
+    { start, end: leftEnd },
+  ];
+}
+
+function getInitialDateWindows(lookbackYears) {
+  const now = new Date();
+  const windows = [];
+
+  for (let offset = 0; offset < lookbackYears; offset += 1) {
+    const year = now.getUTCFullYear() - offset;
+    const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
+    const end = offset === 0
+      ? now
+      : new Date(Date.UTC(year, 11, 31, 23, 59, 59));
+
+    windows.push({ start, end });
+  }
+
+  return windows;
+}
+
+async function githubRequest(url, token) {
+  const response = await fetch(url, {
     headers: {
-      "content-type": "application/json",
+      accept: "application/vnd.github+json",
       authorization: `Bearer ${token}`,
       "user-agent": "gh-profile-sync-script",
+      "x-github-api-version": "2022-11-28",
     },
-    body: JSON.stringify({ query, variables }),
   });
 
   const payload = await response.json();
 
-  if (!response.ok || payload.errors) {
-    const details = payload.errors
-      ? payload.errors.map((error) => error.message).join("; ")
-      : `HTTP ${response.status}`;
-
-    throw new Error(`GitHub GraphQL request failed: ${details}`);
+  if (!response.ok) {
+    const message = payload.message || `HTTP ${response.status}`;
+    throw new Error(`GitHub request failed: ${message}`);
   }
 
-  return payload.data;
+  return payload;
 }
 
-function upsertRepo(repoMap, repository, typeKey, count) {
-  if (!repository?.isPublic) {
-    return;
+async function searchCommits({ username, start, end, page, token }) {
+  const query = [
+    `author:${username}`,
+    `author-date:${toIsoDate(start)}..${toIsoDate(end)}`,
+  ].join(" ");
+
+  const url = new URL("https://api.github.com/search/commits");
+  url.searchParams.set("q", query);
+  url.searchParams.set("sort", "author-date");
+  url.searchParams.set("order", "desc");
+  url.searchParams.set("per_page", String(SEARCH_RESULTS_PER_PAGE));
+  url.searchParams.set("page", String(page));
+
+  return githubRequest(url, token);
+}
+
+function normalizeCommit(item) {
+  if (!item?.repository || item.repository.private) {
+    return null;
   }
 
-  const fullName = repository.nameWithOwner;
-  const existing = repoMap.get(fullName) ?? {
-    nameWithOwner: fullName,
-    url: repository.url,
-    description: repository.description,
-    stars: repository.stargazerCount,
-    total: 0,
-    types: {
-      commits: 0,
-      pullRequests: 0,
-      issues: 0,
-      reviews: 0,
-    },
+  const authoredAt = item.commit?.author?.date || item.commit?.committer?.date;
+
+  if (!authoredAt) {
+    return null;
+  }
+
+  const title = (item.commit.message || "Untitled commit").split("\n")[0].trim();
+  const url = item.html_url || `${item.repository.html_url}/commit/${item.sha}`;
+
+  return {
+    sha: item.sha,
+    shortSha: item.sha.slice(0, 7),
+    title: title || "Untitled commit",
+    url,
+    authoredAt,
+    repositoryName: item.repository.full_name,
+    repositoryUrl: item.repository.html_url,
+  };
+}
+
+async function collectWindowCommits({
+  username,
+  start,
+  end,
+  token,
+  commits,
+  commitUrls,
+  maxCommits,
+  warnings,
+}) {
+  const firstPage = await searchCommits({ username, start, end, page: 1, token });
+  const windowDays = Math.ceil((end.getTime() - start.getTime()) / 86400000);
+
+  if (firstPage.incomplete_results) {
+    warnings.add(`GitHub reported incomplete search results for ${toIsoDate(start)}..${toIsoDate(end)}.`);
+  }
+
+  if (firstPage.total_count > SEARCH_RESULT_WINDOW_LIMIT && windowDays >= MIN_SPLIT_WINDOW_DAYS) {
+    const windows = splitDateRange(start, end);
+
+    for (const window of windows) {
+      await collectWindowCommits({
+        username,
+        start: window.start,
+        end: window.end,
+        token,
+        commits,
+        commitUrls,
+        maxCommits,
+        warnings,
+      });
+    }
+
+    return firstPage.total_count;
+  }
+
+  const cappedTotal = Math.min(firstPage.total_count, 1000);
+
+  if (firstPage.total_count > 1000) {
+    warnings.add(`GitHub only returns the first 1000 commit results for ${toIsoDate(start)}..${toIsoDate(end)}.`);
+  }
+
+  const maybeAddCommits = (items) => {
+    if (commits.length >= maxCommits) {
+      return;
+    }
+
+    for (const item of items) {
+      if (commits.length >= maxCommits) {
+        break;
+      }
+
+      const commit = normalizeCommit(item);
+
+      if (!commit || commitUrls.has(commit.url)) {
+        continue;
+      }
+
+      commitUrls.add(commit.url);
+      commits.push(commit);
+    }
   };
 
-  existing.description = repository.description;
-  existing.stars = repository.stargazerCount;
-  existing.total += count;
-  existing.types[typeKey] += count;
+  maybeAddCommits(firstPage.items || []);
 
-  repoMap.set(fullName, existing);
+  const totalPages = Math.ceil(cappedTotal / SEARCH_RESULTS_PER_PAGE);
+
+  for (let page = 2; page <= totalPages && commits.length < maxCommits; page += 1) {
+    const nextPage = await searchCommits({ username, start, end, page, token });
+    maybeAddCommits(nextPage.items || []);
+  }
+
+  return firstPage.total_count;
 }
 
-function collectContributions(repoMap, collection) {
-  for (const entry of collection.commitContributionsByRepository ?? []) {
-    upsertRepo(repoMap, entry.repository, "commits", entry.contributions.totalCount);
-  }
-
-  for (const entry of collection.pullRequestContributionsByRepository ?? []) {
-    upsertRepo(repoMap, entry.repository, "pullRequests", entry.contributions.totalCount);
-  }
-
-  for (const entry of collection.issueContributionsByRepository ?? []) {
-    upsertRepo(repoMap, entry.repository, "issues", entry.contributions.totalCount);
-  }
-
-  for (const entry of collection.pullRequestReviewContributionsByRepository ?? []) {
-    upsertRepo(repoMap, entry.repository, "reviews", entry.contributions.totalCount);
-  }
-}
-
-function buildSection(username, repos, lookbackYears) {
+function buildSection({ username, lookbackYears, totalCommits, shownCommits, maxCommits, warnings }) {
   const lines = [
-    "## Open Source Contributions",
+    "## Open Source Commits",
     "",
-    `Public repositories with tracked GitHub contributions for @${username} in the last ${lookbackYears} year${lookbackYears === 1 ? "" : "s"}.`,
+    `Public GitHub commits authored by @${username} in the last ${lookbackYears} year${lookbackYears === 1 ? "" : "s"}. Showing the latest ${Math.min(shownCommits.length, maxCommits)} of ${totalCommits}.`,
     "",
   ];
 
-  if (repos.length === 0) {
-    lines.push("- No public repository contributions found for the configured time window.");
+  if (warnings.length > 0) {
+    lines.push(`_Note: ${warnings.join(" ")}_`, "");
+  }
+
+  if (shownCommits.length === 0) {
+    lines.push("- No public commits found for the configured time window.");
     return lines.join("\n");
   }
 
-  for (const repo of repos) {
-    const typeSummary = [
-      repo.types.commits ? `${repo.types.commits} commit${repo.types.commits === 1 ? "" : "s"}` : null,
-      repo.types.pullRequests ? `${repo.types.pullRequests} PR${repo.types.pullRequests === 1 ? "" : "s"}` : null,
-      repo.types.issues ? `${repo.types.issues} issue${repo.types.issues === 1 ? "" : "s"}` : null,
-      repo.types.reviews ? `${repo.types.reviews} review${repo.types.reviews === 1 ? "" : "s"}` : null,
-    ].filter(Boolean).join(", ");
-
-    const description = repo.description ? ` - ${repo.description}` : "";
-    const stars = repo.stars ? `, ${repo.stars} star${repo.stars === 1 ? "" : "s"}` : "";
-    const recent = "";
-
-    lines.push(`- [${repo.nameWithOwner}](${repo.url})${description}`);
-    lines.push(`  - ${repo.total} contribution${repo.total === 1 ? "" : "s"}: ${typeSummary}${stars}${recent}`);
+  for (const commit of shownCommits) {
+    lines.push(
+      `- ${formatDate(new Date(commit.authoredAt))} - [${commit.repositoryName}](${commit.repositoryUrl}) - [${truncate(commit.title, 88)}](${commit.url}) (${"`"}${commit.shortSha}${"`"})`
+    );
   }
 
   return lines.join("\n");
@@ -181,13 +277,14 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help === "true") {
-    console.log(`Usage: node scripts/update-profile-readme.mjs [--readme README.md] [--username remy90]\n\nRequired env:\n- GITHUB_TOKEN\n\nOptional env:\n- GITHUB_USERNAME\n- LOOKBACK_YEARS\n- CONTRIBUTIONS_SECTION_START\n- CONTRIBUTIONS_SECTION_END`);
+    console.log(`Usage: node scripts/update-profile-readme.mjs [--readme README.md] [--username remy90]\n\nRequired env:\n- GITHUB_TOKEN\n\nOptional env:\n- GITHUB_USERNAME\n- LOOKBACK_YEARS\n- MAX_COMMITS\n- CONTRIBUTIONS_SECTION_START\n- CONTRIBUTIONS_SECTION_END`);
     return;
   }
 
   const token = getEnv("GITHUB_TOKEN");
   const username = args.username ?? getEnv("GITHUB_USERNAME", "remy90");
   const lookbackYears = Number.parseInt(args["lookback-years"] ?? getEnv("LOOKBACK_YEARS", "5"), 10);
+  const maxCommits = Number.parseInt(args["max-commits"] ?? getEnv("MAX_COMMITS", "100"), 10);
   const readmePath = path.resolve(args.readme ?? getEnv("PROFILE_README_PATH", "README.md"));
   const sectionStart = getEnv("CONTRIBUTIONS_SECTION_START", DEFAULT_SECTION_START);
   const sectionEnd = getEnv("CONTRIBUTIONS_SECTION_END", DEFAULT_SECTION_END);
@@ -200,85 +297,39 @@ async function main() {
     throw new Error("LOOKBACK_YEARS must be a positive integer.");
   }
 
-  const query = `
-    query ContributionRepos($username: String!, $from: DateTime!, $to: DateTime!) {
-      user(login: $username) {
-        contributionsCollection(from: $from, to: $to) {
-          commitContributionsByRepository(maxRepositories: 100) {
-            repository {
-              nameWithOwner
-              url
-              description
-              isPublic
-              stargazerCount
-            }
-            contributions(first: 1) {
-              totalCount
-            }
-          }
-          issueContributionsByRepository(maxRepositories: 100) {
-            repository {
-              nameWithOwner
-              url
-              description
-              isPublic
-              stargazerCount
-            }
-            contributions(first: 1) {
-              totalCount
-            }
-          }
-          pullRequestContributionsByRepository(maxRepositories: 100) {
-            repository {
-              nameWithOwner
-              url
-              description
-              isPublic
-              stargazerCount
-            }
-            contributions(first: 1) {
-              totalCount
-            }
-          }
-          pullRequestReviewContributionsByRepository(maxRepositories: 100) {
-            repository {
-              nameWithOwner
-              url
-              description
-              isPublic
-              stargazerCount
-            }
-            contributions(first: 1) {
-              totalCount
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  const repoMap = new Map();
-  const yearRanges = getYearRanges(lookbackYears);
-
-  for (const range of yearRanges) {
-    const data = await graphqlRequest(query, { username, from: range.from, to: range.to }, token);
-
-    if (!data.user) {
-      throw new Error(`GitHub user not found: ${username}`);
-    }
-
-    collectContributions(repoMap, data.user.contributionsCollection);
+  if (!Number.isInteger(maxCommits) || maxCommits < 1) {
+    throw new Error("MAX_COMMITS must be a positive integer.");
   }
 
-  const repos = [...repoMap.values()].sort((left, right) => {
-    if (right.total !== left.total) {
-      return right.total - left.total;
-    }
+  const commits = [];
+  const commitUrls = new Set();
+  const warnings = new Set();
+  let totalCommits = 0;
 
-    return left.nameWithOwner.localeCompare(right.nameWithOwner);
+  for (const window of getInitialDateWindows(lookbackYears)) {
+    totalCommits += await collectWindowCommits({
+      username,
+      start: window.start,
+      end: window.end,
+      token,
+      commits,
+      commitUrls,
+      maxCommits,
+      warnings,
+    });
+  }
+
+  commits.sort((left, right) => new Date(right.authoredAt).getTime() - new Date(left.authoredAt).getTime());
+
+  const sectionContent = buildSection({
+    username,
+    lookbackYears,
+    totalCommits,
+    shownCommits: commits.slice(0, maxCommits),
+    maxCommits,
+    warnings: [...warnings],
   });
 
-  const sectionContent = buildSection(username, repos, lookbackYears);
   const changed = await updateReadme({
     readmePath,
     sectionStart,
@@ -288,8 +339,8 @@ async function main() {
 
   console.log(
     changed
-      ? `Updated ${readmePath} with ${repos.length} contributed repositories.`
-      : `No README changes needed. ${repos.length} contributed repositories already in sync.`
+      ? `Updated ${readmePath} with ${Math.min(commits.length, maxCommits)} commit links.`
+      : `No README changes needed. ${Math.min(commits.length, maxCommits)} commit links already in sync.`
   );
 }
 

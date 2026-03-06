@@ -1,4 +1,4 @@
-name: Sync profile contributions
+name: Sync profile commits
 
 on:
   workflow_dispatch:
@@ -26,6 +26,7 @@ jobs:
           GITHUB_USERNAME: remy90
           PROFILE_README_PATH: README.md
           LOOKBACK_YEARS: 5
+          MAX_COMMITS: 100
         run: node scripts/update-profile-readme.mjs
 
       - name: Commit and push
@@ -38,5 +39,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md
-          git commit -m "Update contribution list"
+          git commit -m "Update commit list"
           git push
