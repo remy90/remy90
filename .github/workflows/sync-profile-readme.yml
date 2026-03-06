@@ -24,6 +24,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_USERNAME: remy90
+          IGNORE_REPO_OWNERS: remy90
           PROFILE_README_PATH: README.md
           LOOKBACK_YEARS: 5
           MAX_COMMITS: 100
