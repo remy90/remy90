@@ -1,0 +1,50 @@
+name: Sync profile contributions
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * 1"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out automation repo
+        uses: actions/checkout@v4
+
+      - name: Check out profile repo
+        uses: actions/checkout@v4
+        with:
+          repository: remy90/remy90
+          path: profile
+          token: ${{ secrets.PROFILE_SYNC_TOKEN }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update profile README
+        env:
+          GITHUB_TOKEN: ${{ secrets.PROFILE_SYNC_TOKEN }}
+          GITHUB_USERNAME: remy90
+          PROFILE_README_PATH: profile/README.md
+          LOOKBACK_YEARS: 5
+        run: node scripts/update-profile-readme.mjs
+
+      - name: Commit and push
+        working-directory: profile
+        run: |
+          if git diff --quiet; then
+            echo "No README changes to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Update contribution list"
+          git push
