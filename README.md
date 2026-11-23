@@ -1,13 +1,13 @@
 <!-- contributions:start -->
 ## Open Source Commits
 
-Public GitHub commits authored by @remy90 in the last 5 years. Showing the latest 12 of 27.
+Public GitHub commits authored by @remy90 in the last 5 years. Showing the latest 12 of 108.
 
-- [openapi-ts/openapi-typescript](https://github.com/openapi-ts/openapi-typescript) - 8,439 stars - [feat(openAPI-union) Add type support for unions with additionalProperties to provide ts...](https://github.com/openapi-ts/openapi-typescript/commit/f55fb72f93ef4fe009278bcc1f62e5d16e4012e5) (`f55fb72`)
-- [Nomadcxx/opencode-cursor](https://github.com/Nomadcxx/opencode-cursor) - 723 stars - [fix: Add proxy health reuse guard, await child.exited for SSE stream](https://github.com/Nomadcxx/opencode-cursor/commit/0932508762e94266ce605dc2f033f9f24ae6ca9b) (`0932508`)
-- [Nomadcxx/opencode-cursor](https://github.com/Nomadcxx/opencode-cursor) - 723 stars - [fix: Add proxy health reuse guard, await child.exited for SSE stream](https://github.com/Nomadcxx/opencode-cursor/commit/b3eadb04e9bcf7d96e979686dbd624b766a9f570) (`b3eadb0`)
-- [muhammedaksam/waha-tui](https://github.com/muhammedaksam/waha-tui) - 415 stars - [fix: resolve group sender names via lid mapping](https://github.com/muhammedaksam/waha-tui/commit/60b82692eaefd1d5253636116b33fa30c486f67e) (`60b8269`)
-- [openapi-typesafe/openapi-typesafe](https://github.com/openapi-typesafe/openapi-typesafe) - 10 stars - [feat(openAPI-union) Add type support for unions with additionalProperties to provide ts...](https://github.com/openapi-typesafe/openapi-typesafe/commit/f55fb72f93ef4fe009278bcc1f62e5d16e4012e5) (`f55fb72`)
+- [openapi-ts/openapi-typescript](https://github.com/openapi-ts/openapi-typescript) - 8,441 stars - [feat(openAPI-union) Add type support for unions with additionalProperties to provide ts...](https://github.com/openapi-ts/openapi-typescript/commit/f55fb72f93ef4fe009278bcc1f62e5d16e4012e5) (`f55fb72`)
+- [Nomadcxx/opencode-cursor](https://github.com/Nomadcxx/opencode-cursor) - 725 stars - [fix: Add proxy health reuse guard, await child.exited for SSE stream](https://github.com/Nomadcxx/opencode-cursor/commit/0932508762e94266ce605dc2f033f9f24ae6ca9b) (`0932508`)
+- [Nomadcxx/opencode-cursor](https://github.com/Nomadcxx/opencode-cursor) - 725 stars - [fix: Add proxy health reuse guard, await child.exited for SSE stream](https://github.com/Nomadcxx/opencode-cursor/commit/b3eadb04e9bcf7d96e979686dbd624b766a9f570) (`b3eadb0`)
+- [muhammedaksam/waha-tui](https://github.com/muhammedaksam/waha-tui) - 416 stars - [fix: resolve group sender names via lid mapping](https://github.com/muhammedaksam/waha-tui/commit/60b82692eaefd1d5253636116b33fa30c486f67e) (`60b8269`)
+- [openapi-typesafe/openapi-typesafe](https://github.com/openapi-typesafe/openapi-typesafe) - 16 stars - [feat(openAPI-union) Add type support for unions with additionalProperties to provide ts...](https://github.com/openapi-typesafe/openapi-typesafe/commit/f55fb72f93ef4fe009278bcc1f62e5d16e4012e5) (`f55fb72`)
 - [zjywill/opencode-cursor](https://github.com/zjywill/opencode-cursor) - 0 stars - [fix: Add proxy health reuse guard, await child.exited for SSE stream](https://github.com/zjywill/opencode-cursor/commit/0932508762e94266ce605dc2f033f9f24ae6ca9b) (`0932508`)
 - [zjywill/opencode-cursor](https://github.com/zjywill/opencode-cursor) - 0 stars - [fix: Add proxy health reuse guard, await child.exited for SSE stream](https://github.com/zjywill/opencode-cursor/commit/b3eadb04e9bcf7d96e979686dbd624b766a9f570) (`b3eadb0`)
 - [ZephyrFoundary/openapi-typed](https://github.com/ZephyrFoundary/openapi-typed) - 0 stars - [feat(openAPI-union) Add type support for unions with additionalProperties to provide ts...](https://github.com/ZephyrFoundary/openapi-typed/commit/f55fb72f93ef4fe009278bcc1f62e5d16e4012e5) (`f55fb72`)
